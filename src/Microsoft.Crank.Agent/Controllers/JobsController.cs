@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Microsoft.Crank.Models;
 using Microsoft.AspNetCore.Mvc;
 using Repository;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Crank.Agent.Controllers
 {
@@ -22,10 +23,12 @@ namespace Microsoft.Crank.Agent.Controllers
         private static readonly HttpClient _httpClient = new HttpClient();
 
         private readonly IJobRepository _jobs;
+        private readonly ILogger<JobsController> _logger;
 
-        public JobsController(IJobRepository jobs)
+        public JobsController(IJobRepository jobs, ILogger<JobsController> logger)
         {
             _jobs = jobs;
+            _logger = logger;
         }
 
         [HttpGet("all")]
@@ -753,10 +756,9 @@ namespace Microsoft.Crank.Agent.Controllers
                 ;
         }
 
-        private static void Log(string message)
+        private void Log(string message)
         {
-            var time = DateTime.Now.ToString("hh:mm:ss.fff");
-            Console.WriteLine($"[{time}] {message}");
+            _logger.LogInformation(message);
         }
 
         private class TempFolder : IDisposable
