@@ -39,6 +39,8 @@ using Newtonsoft.Json.Linq;
 using NuGet.Versioning;
 using Repository;
 using Serilog;
+using Serilog.Events;
+using Serilog.Filters;
 using Serilog.Sinks.SystemConsole.Themes;
 using Vanara.PInvoke;
 using OperatingSystem = Microsoft.Crank.Models.OperatingSystem;
@@ -145,7 +147,7 @@ namespace Microsoft.Crank.Agent
             _logPath
             ;
 
-        internal static Serilog.Core.Logger Logger { get ; private set ; }
+        internal static Serilog.Core.Logger Logger { get; private set; }
 
         static Startup()
         {
@@ -191,7 +193,7 @@ namespace Microsoft.Crank.Agent
             {
                 endpoints.MapGet("jobs/{id}/state", JobsApis.GetState);
                 endpoints.MapGet("jobs/{id}/touch", JobsApis.GetTouch);
-                
+
                 endpoints.MapDefaultControllerRoute();
             });
         }
@@ -230,13 +232,6 @@ namespace Microsoft.Crank.Agent
             _runAsService = app.Option("--service", "If specified, runs crank-agent as a service", CommandOptionType.NoValue);
             _logPath = app.Option("--log-path", "The path where logs are written.", CommandOptionType.SingleValue);
 
-            Logger = new LoggerConfiguration()
-                  .MinimumLevel.Information()
-                  .Enrich.FromLogContext()
-                  .WriteTo.Console(theme: AnsiConsoleTheme.Code)
-                  .WriteTo.File(_logPath.Value() ?? "crank-agent-log.txt", rollingInterval: RollingInterval.Day)
-                  .CreateLogger();
-
             if (_runAsService.HasValue() && OperatingSystem != OperatingSystem.Windows)
             {
                 throw new PlatformNotSupportedException($"--service is only available on Windows");
@@ -244,6 +239,14 @@ namespace Microsoft.Crank.Agent
 
             app.OnExecute(() =>
             {
+                Logger = new LoggerConfiguration()
+                 .MinimumLevel.Information()
+                 .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+                 .Enrich.FromLogContext()
+                 .WriteTo.Console(theme: AnsiConsoleTheme.Code)
+                 .WriteTo.File(_logPath.Value() ?? "crank-agent-log.txt", rollingInterval: RollingInterval.Day)
+                 .CreateLogger();
+
                 if (noCleanupOption.HasValue())
                 {
                     _cleanup = false;
@@ -313,11 +316,7 @@ namespace Microsoft.Crank.Agent
                     .ConfigureKestrel(o => o.Limits.MaxRequestBodySize = (long)10 * 1024 * 1024 * 1024)
                     .UseStartup<Startup>()
                     .UseUrls(url)
-                    .ConfigureLogging((hostingContext, logging) =>
-                    {
-                        logging.ClearProviders();
-                        logging.AddSerilog(Logger, dispose: false);
-                    });
+                    .UseSerilog(Logger);
 
             if (_relayConnectionStringOption.HasValue())
             {
@@ -415,7 +414,7 @@ namespace Microsoft.Crank.Agent
                     Log.Info($"Found sdk {sdkVersion}");
                 }
             }
-            
+
             var runtimeLocation = Path.Combine(dotnethome, "shared", "Microsoft.NETCore.App");
 
             if (Directory.Exists(runtimeLocation))
@@ -1069,7 +1068,7 @@ namespace Microsoft.Crank.Agent
                                                             // TODO: Accessing the TotalProcessorTime on OSX throws so just leave it as 0 for now
                                                             // We need to dig into this
                                                             Process trackProcess = null;
-                                                            
+
                                                             if (job.ChildProcessId != 0)
                                                             {
                                                                 try
@@ -1103,7 +1102,7 @@ namespace Microsoft.Crank.Agent
                                                                 var newCPUTime = OperatingSystem == OperatingSystem.OSX
                                                                     ? TimeSpan.Zero
                                                                     : trackProcess.TotalProcessorTime;
-                                                                                                                        
+
                                                                 var elapsed = now.Subtract(lastMonitorTime).TotalMilliseconds;
                                                                 var rawCpu = (newCPUTime - oldCPUTime).TotalMilliseconds / elapsed * 100;
                                                                 var cpu = Math.Round(rawCpu / Environment.ProcessorCount);
@@ -1320,9 +1319,9 @@ namespace Microsoft.Crank.Agent
                             void StopCounters()
                             {
                                 // Releasing Counters
-                                
+
                                 Log.Info($"Stopping counters event pipes for job '{job.Service}' ({job.Id})");
-                                
+
                                 try
                                 {
                                     if (context.CountersTask != null && context.CountersCompletionSource != null)
@@ -1335,7 +1334,7 @@ namespace Microsoft.Crank.Agent
                                         {
                                             Log.Error($"[ERROR] Counters could not be stopped in time for job '{job.Service}' ({job.Id})");
                                         }
-                                        
+
                                         Log.Info($"Counters stopped for job '{job.Service}' ({job.Id})");
                                     }
                                     else
@@ -1374,7 +1373,7 @@ namespace Microsoft.Crank.Agent
                                 }
 
                                 Log.Info($"Stopping heartbeat ({job.Service}:{job.Id})");
-                                    
+
                                 Monitor.Enter(_synLock);
 
                                 try
@@ -1479,7 +1478,7 @@ namespace Microsoft.Crank.Agent
 
                                             // Disable CTRL handling for the Agent, or the CTRL+C would stop it too
                                             SetConsoleCtrlHandler(null, true);
-                                            GenerateConsoleCtrlEvent(CtrlTypes.CTRL_C_EVENT, (uint) process.Id);
+                                            GenerateConsoleCtrlEvent(CtrlTypes.CTRL_C_EVENT, (uint)process.Id);
 
                                             var waitForShutdownDelay = Task.Delay(TimeSpan.FromSeconds(5));
                                             while (!process.HasExited && !waitForShutdownDelay.IsCompletedSuccessfully)
@@ -1719,7 +1718,7 @@ namespace Microsoft.Crank.Agent
             return process;
         }
 
-        private static async Task StopPerfcollectAsync(Job job,Process perfCollectProcess)
+        private static async Task StopPerfcollectAsync(Job job, Process perfCollectProcess)
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
@@ -1744,7 +1743,7 @@ namespace Microsoft.Crank.Agent
                 ? job.CollectTimeout
                 : CollectTimeout
                 ;
-                
+
             var delay = Task.Delay(collectTimeout);
 
             while (!perfCollectProcess.HasExited && !delay.IsCompletedSuccessfully)
@@ -1813,7 +1812,7 @@ namespace Microsoft.Crank.Agent
             {
                 // Check the source options are the same (repos, branch, ...)
                 var optionsPath = Path.Combine(path, "options.json");
-                
+
                 if (File.Exists(optionsPath))
                 {
                     var content = File.ReadAllText(optionsPath);
@@ -1858,7 +1857,7 @@ namespace Microsoft.Crank.Agent
                     Log.Info($"Extracting source code to {srcDir}");
 
                     ZipFile.ExtractToDirectory(job.Source.SourceCode.TempFilename, srcDir);
-                
+
                     // Convert CRLF to LF on Linux
                     if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                     {
@@ -1940,7 +1939,7 @@ namespace Microsoft.Crank.Agent
                 Log.Info("Skipping build step, reusing previous build");
             }
             else
-                {
+            {
                 // The DockerLoad argument contains the path of a tar file that can be loaded
                 if (String.IsNullOrEmpty(source.DockerLoad))
                 {
@@ -1990,7 +1989,7 @@ namespace Microsoft.Crank.Agent
                         log: true,
                         outputDataReceived: text => job.BuildLog.AddLine(text));
 
-                    if(long.TryParse(inspectResults.StandardOutput.Trim(), out var imageSize))
+                    if (long.TryParse(inspectResults.StandardOutput.Trim(), out var imageSize))
                     {
                         if (imageSize != 0)
                         {
@@ -2005,7 +2004,7 @@ namespace Microsoft.Crank.Agent
                         }
                     }
 
-                  
+
                 }
                 else
                 {
@@ -2015,9 +2014,9 @@ namespace Microsoft.Crank.Agent
 
                     job.BuildLog.AddLine("docker " + dockerLoadArguments);
 
-                    await ProcessUtil.RunAsync("docker", dockerLoadArguments, 
-                        workingDirectory: srcDir, 
-                        cancellationToken: cancellationToken, 
+                    await ProcessUtil.RunAsync("docker", dockerLoadArguments,
+                        workingDirectory: srcDir,
+                        cancellationToken: cancellationToken,
                         log: true,
                         outputDataReceived: text => job.BuildLog.AddLine(text)
                     );
@@ -2057,9 +2056,9 @@ namespace Microsoft.Crank.Agent
 
             job.BuildLog.AddLine("docker " + command);
 
-            var result = await ProcessUtil.RunAsync("docker", $"{command} ", 
-                throwOnError: true, 
-                onStart: _ => stopwatch.Start(), 
+            var result = await ProcessUtil.RunAsync("docker", $"{command} ",
+                throwOnError: true,
+                onStart: _ => stopwatch.Start(),
                 captureOutput: true,
                 log: true,
                 outputDataReceived: text => job.BuildLog.AddLine(text)
@@ -2092,7 +2091,7 @@ namespace Microsoft.Crank.Agent
             };
 
             process.Start();
-            
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -2317,19 +2316,19 @@ namespace Microsoft.Crank.Agent
                     else if (job.NoClean)
                     {
                         Log.Info($"Removing image {imageName}");
-                    
+
                         // --no-prune: Do not delete untagged parents
                         await ProcessUtil.RunAsync("docker", $"rmi --force --no-prune {imageName}", throwOnError: false);
                     }
                     else
-                    {                        
+                    {
                         Log.Info($"Removing image {imageName} and its parents");
                         await ProcessUtil.RunAsync("docker", $"rmi --force {imageName}", throwOnError: false);
                     }
                 }
                 catch (Exception e)
                 {
-                    Log.Error(e,"An error occurred while deleting the docker container: " + e.Message);
+                    Log.Error(e, "An error occurred while deleting the docker container: " + e.Message);
                     finalState = JobState.Failed;
                 }
                 finally
@@ -2350,7 +2349,7 @@ namespace Microsoft.Crank.Agent
             {
                 // Check the source options are the same (repos, branch, ...)
                 var optionsPath = Path.Combine(path, "options.json");
-                
+
                 if (File.Exists(optionsPath))
                 {
                     var content = File.ReadAllText(optionsPath);
@@ -2569,9 +2568,9 @@ namespace Microsoft.Crank.Agent
 
             sdkVersion = PatchOrCreateGlobalJson(job, benchmarkedApp, sdkVersion);
 
-            var installAspNetSharedFramework = job.UseRuntimeStore 
-                || aspNetCoreVersion.StartsWith("3.0") 
-                || aspNetCoreVersion.StartsWith("3.1") 
+            var installAspNetSharedFramework = job.UseRuntimeStore
+                || aspNetCoreVersion.StartsWith("3.0")
+                || aspNetCoreVersion.StartsWith("3.1")
                 || aspNetCoreVersion.StartsWith("5.0")
                 || aspNetCoreVersion.StartsWith("6.0")
                 || aspNetCoreVersion.StartsWith("7.0")
@@ -2602,14 +2601,14 @@ namespace Microsoft.Crank.Agent
 
                         ProcessResult result = await ProcessUtil.RunAsync("powershell", $"-NoProfile -ExecutionPolicy unrestricted [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; .\\dotnet-install.ps1 -Version {sdkVersion} -NoPath -SkipNonVersionedFiles -InstallDir {dotnetHome} -AzureFeed {dotnetFeed}",
                             log: false,
-                            throwOnError: false, 
+                            throwOnError: false,
                             workingDirectory: _dotnetInstallPath,
                             environmentVariables: env,
                             cancellationToken: cancellationToken);
 
                         if (result.ExitCode != 0)
                         {
-                            throw new InvalidOperationException(); 
+                            throw new InvalidOperationException();
                         }
 
                         _installedSdks.Add(sdkVersion);
@@ -2631,7 +2630,7 @@ namespace Microsoft.Crank.Agent
 
                         ProcessResult result = await ProcessUtil.RunAsync("powershell", $"-NoProfile -ExecutionPolicy unrestricted [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; .\\dotnet-install.ps1 -Version {runtimeVersion} -Runtime dotnet -NoPath -SkipNonVersionedFiles -InstallDir {dotnetHome} -AzureFeed {dotnetFeed}",
                                 log: false,
-                                throwOnError: false, 
+                                throwOnError: false,
                                 workingDirectory: _dotnetInstallPath,
                                 environmentVariables: env,
                                 cancellationToken: cancellationToken);
@@ -2651,8 +2650,8 @@ namespace Microsoft.Crank.Agent
 
                         if (!beforeDesktop.Contains(targetFramework))
                         {
-                            if (!String.IsNullOrEmpty(desktopVersion) 
-                                && !_installedDesktopRuntimes.Contains(desktopVersion) 
+                            if (!String.IsNullOrEmpty(desktopVersion)
+                                && !_installedDesktopRuntimes.Contains(desktopVersion)
                                 && !_ignoredDesktopRuntimes.Contains(desktopVersion))
                             {
                                 dotnetInstallStep = $"Desktop runtime '{desktopVersion}'";
@@ -2667,7 +2666,7 @@ namespace Microsoft.Crank.Agent
 
                                 ProcessResult result = await ProcessUtil.RunAsync("powershell", $"-NoProfile -ExecutionPolicy unrestricted [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; .\\dotnet-install.ps1 -Version {desktopVersion} -Runtime windowsdesktop -NoPath -SkipNonVersionedFiles -InstallDir {dotnetHome} -AzureFeed {dotnetFeed}",
                                         log: false,
-                                        throwOnError: false, 
+                                        throwOnError: false,
                                         workingDirectory: _dotnetInstallPath,
                                         environmentVariables: env,
                                         cancellationToken: cancellationToken);
@@ -2715,7 +2714,7 @@ namespace Microsoft.Crank.Agent
 
                         ProcessResult result = await ProcessUtil.RunAsync("powershell", $"-NoProfile -ExecutionPolicy unrestricted [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; .\\dotnet-install.ps1 -Version {aspNetCoreVersion} -Runtime aspnetcore -NoPath -SkipNonVersionedFiles -InstallDir {dotnetHome} -AzureFeed {dotnetFeed}",
                                 log: false,
-                                throwOnError: false, 
+                                throwOnError: false,
                                 workingDirectory: _dotnetInstallPath,
                                 environmentVariables: env,
                                 cancellationToken: cancellationToken);
@@ -2746,7 +2745,7 @@ namespace Microsoft.Crank.Agent
 
                         ProcessResult result = await ProcessUtil.RunAsync("/usr/bin/env", $"bash dotnet-install.sh --version {sdkVersion} --no-path --skip-non-versioned-files --install-dir {dotnetHome} -AzureFeed {dotnetFeed}",
                                 log: false,
-                                throwOnError: false, 
+                                throwOnError: false,
                                 workingDirectory: _dotnetInstallPath,
                                 environmentVariables: env,
                                 cancellationToken: cancellationToken);
@@ -2805,7 +2804,7 @@ namespace Microsoft.Crank.Agent
 
                         ProcessResult result = await ProcessUtil.RunAsync("/usr/bin/env", $"bash dotnet-install.sh --version {aspNetCoreVersion} --runtime aspnetcore --no-path --skip-non-versioned-files --install-dir {dotnetHome} -AzureFeed {dotnetFeed}",
                                 log: false,
-                                throwOnError: false, 
+                                throwOnError: false,
                                 workingDirectory: _dotnetInstallPath,
                                 environmentVariables: env,
                                 cancellationToken: cancellationToken);
@@ -2891,7 +2890,7 @@ namespace Microsoft.Crank.Agent
                 }
                 catch (Exception e)
                 {
-                    Log.Error(e,"[ERROR] Could not record AspNetCoreVersion:");
+                    Log.Error(e, "[ERROR] Could not record AspNetCoreVersion:");
                 }
             }
 
@@ -3500,7 +3499,7 @@ namespace Microsoft.Crank.Agent
                 {
                     targetFramework = "netcoreapp" + runtimeVersion.Substring(0, 3);
                 }
-                
+
                 runtimeVersion = "edge";
             }
             else if (runtimeVersion.Split('.').Length == 2) // 2.1, 5.0
@@ -3515,7 +3514,7 @@ namespace Microsoft.Crank.Agent
                 {
                     targetFramework = "netcoreapp" + runtimeVersion.Substring(0, 3);
                 }
-                
+
                 runtimeVersion = "current";
             }
 
@@ -3632,7 +3631,7 @@ namespace Microsoft.Crank.Agent
 
                     var globalJson = "{ \"sdk\": { \"version\": \"" + sdkVersion + "\" } }";
                     File.WriteAllText(Path.Combine(benchmarkedApp, "global.json"), globalJson);
-                    }
+                }
                 else
                 {
                     // File found, we need to update it
@@ -4463,7 +4462,7 @@ namespace Microsoft.Crank.Agent
 
                     // Detect the app is wrapping a child process
                     var processIdMarker = "##ChildProcessId:";
-                    if (e.Data.StartsWith(processIdMarker) 
+                    if (e.Data.StartsWith(processIdMarker)
                         && int.TryParse(e.Data.Substring(processIdMarker.Length), out var childProcessId))
                     {
                         Log.Info($"Tracking child process id: {childProcessId}");
@@ -4496,7 +4495,7 @@ namespace Microsoft.Crank.Agent
             process.Start();
 
             job.ProcessId = process.Id;
-            
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
@@ -4548,10 +4547,10 @@ namespace Microsoft.Crank.Agent
                         }
                         else
                         {
-                            for (var i = int.Parse(bounds[0]); i<= int.Parse(bounds[1]); i++)
+                            for (var i = int.Parse(bounds[0]); i <= int.Parse(bounds[1]); i++)
                             {
                                 cpuSet.Add(i);
-                            }                            
+                            }
                         }
                     }
 
@@ -4561,8 +4560,8 @@ namespace Microsoft.Crank.Agent
                     Log.Info($"Limiting CpuSet ids: {String.Join(',', cpuSets)}");
 
                     var result = Kernel32.SetProcessDefaultCpuSets(safeProcess, cpuSets, (uint)cpuSets.Length);
-                }              
-                
+                }
+
             }
 
             // We try to detect an endpoint is ready if we are running in IIS (no console logs)
@@ -4619,7 +4618,7 @@ namespace Microsoft.Crank.Agent
                 .Select(p => new EventPipeProvider(
                     name: p,
                     eventLevel: EventLevel.Informational,
-                    arguments: new Dictionary<string, string>() 
+                    arguments: new Dictionary<string, string>()
                         { { "EventCounterIntervalSec", job.MeasurementsIntervalSec.ToString(CultureInfo.InvariantCulture) } })
                 )
                 .ToList();
@@ -4633,7 +4632,7 @@ namespace Microsoft.Crank.Agent
             context.EventPipeSession = null;
 
             var retries = 0;
-            var retryDelays = new [] { 50, 100, 500, 1000 };
+            var retryDelays = new[] { 50, 100, 500, 1000 };
             var maxAttempts = 10;
 
             while (retries <= 10)
@@ -4676,7 +4675,7 @@ namespace Microsoft.Crank.Agent
                     {
                         return;
                     }
- 
+
                     await Task.Delay(retryDelay);
                 }
 
@@ -4700,7 +4699,7 @@ namespace Microsoft.Crank.Agent
 
                 Log.Info("Event pipe source created");
 
-                source.Dynamic.All += (TraceEvent eventData) => 
+                source.Dynamic.All += (TraceEvent eventData) =>
                 {
                     // We only track event counters for System.Runtime
                     if (eventData.ProviderName == "Benchmarks")
@@ -4806,7 +4805,7 @@ namespace Microsoft.Crank.Agent
                 await Task.WhenAny(streamTask, context.CountersCompletionSource.Task);
 
                 Log.Info($"Stopping event pipe session ({job.Service}:{job.Id})...");
-                
+
                 if (streamTask.IsCompleted)
                 {
                     Log.Info($"Reason: event pipe source has ended");
@@ -4837,7 +4836,7 @@ namespace Microsoft.Crank.Agent
             });
 
             context.CountersTask = Task.WhenAll(streamTask, stopTask);
-            
+
             await context.CountersTask;
 
             // The event pipe session needs to be disposed after the source is interrupted
@@ -4873,7 +4872,7 @@ namespace Microsoft.Crank.Agent
 
                 RunPerfview($"start /AcceptEula /NoGui {_startPerfviewArguments} \"{job.PerfViewTraceFile}\"", workingDirectory);
                 Log.Info($"Starting PerfView {_startPerfviewArguments}");
-                
+
                 // PerfView adds ".etl.zip" to the requested filename
                 job.PerfViewTraceFile = job.PerfViewTraceFile + ".etl.zip";
             }
@@ -4926,8 +4925,8 @@ namespace Microsoft.Crank.Agent
             try
             {
                 var packageName = "";
-                
-                switch (mode) 
+
+                switch (mode)
                 {
                     case "jit":
                         packageName = $"Microsoft.NETCore.App.Runtime.Mono.linux-{pkgNameSuffix}".ToLowerInvariant();
@@ -5007,7 +5006,7 @@ namespace Microsoft.Crank.Agent
                 var packageName = $"Microsoft.NETCore.App.Runtime.Mono.LLVM.AOT.linux-{pkgNameSuffix}".ToLowerInvariant();
                 var runtimePath = Path.Combine(_rootTempDir, "RuntimePackages", $"{packageName}.{runtimeVersion}.nupkg");
                 var llvmExtractDir = Path.Combine(Path.GetDirectoryName(runtimePath), "mono-llvm");
-		
+
                 if (!Directory.Exists(Path.GetDirectoryName(dotnetMonoPath)))
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(dotnetMonoPath));
@@ -5029,7 +5028,7 @@ namespace Microsoft.Crank.Agent
                     else
                     {
                         var strCmdTar = $"tar -xf dotnet-sdk-{dotnetSdkVersion}-linux-{pkgNameSuffix}.tar.gz";
-                        var resultTar = await ProcessUtil.RunAsync(fileName, 
+                        var resultTar = await ProcessUtil.RunAsync(fileName,
                             ConvertCmd2Arg(strCmdTar),
                             workingDirectory: Path.GetDirectoryName(dotnetMonoPath),
                             log: true);
@@ -5052,7 +5051,7 @@ namespace Microsoft.Crank.Agent
                         var optExe = archive.GetEntry($"runtimes/linux-{pkgNameSuffix}/native/opt");
                         optExe.ExtractToFile(Path.Combine(llvmExtractDir, "opt"), true);
                     }
-                    
+
                     var strCmdChmod = "chmod +x opt llc";
                     var resultChmod = await ProcessUtil.RunAsync(
                         fileName, ConvertCmd2Arg(strCmdChmod),
@@ -5067,7 +5066,7 @@ namespace Microsoft.Crank.Agent
                 // Copy over mono runtime
                 var strCmdGetVer = "./dotnet --list-runtimes | grep -i \"Microsoft.NETCore.App\"";
                 var resultGetVer = await ProcessUtil.RunAsync(
-                    fileName, 
+                    fileName,
                     ConvertCmd2Arg(strCmdGetVer),
                     workingDirectory: Path.GetDirectoryName(dotnetMonoPath),
                     log: true,
@@ -5339,7 +5338,7 @@ namespace Microsoft.Crank.Agent
                 PackageTypes.WindowsDesktop => "{3}/Runtime/{0}/windowsdesktop-runtime-{0}-{1}.{2}",
                 _ => throw new InvalidOperationException()
             };
-                
+
             var extension = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                 ? "zip"
                 : "tar.gz"
@@ -5391,7 +5390,7 @@ namespace Microsoft.Crank.Agent
                 var version = nugetVersion.OriginalVersion;
 
                 if (await CheckPackageExistsAsync(runtimeType, version))
-                { 
+                {
                     return version;
                 }
                 else
@@ -5478,7 +5477,7 @@ namespace Microsoft.Crank.Agent
                 providers = "cpu-sampling";
             }
 
-            var providerArguments = providers.Split(new [] { ',', ' '}, StringSplitOptions.RemoveEmptyEntries);
+            var providerArguments = providers.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
 
             IEnumerable<EventPipeProvider> providerCollection = new List<EventPipeProvider>();
 
@@ -5535,7 +5534,7 @@ namespace Microsoft.Crank.Agent
             var client = new DiagnosticsClient(processId);
             EventPipeSession traceSession = client.StartEventPipeSession(providerCollection, circularBufferMB: buffersize);
 
-            var collectingTask = new Task(async () => 
+            var collectingTask = new Task(async () =>
             {
                 try
                 {
