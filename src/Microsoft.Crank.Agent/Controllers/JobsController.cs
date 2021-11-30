@@ -755,7 +755,12 @@ namespace Microsoft.Crank.Agent.Controllers
                 .FirstOrDefault(x => x.Service.Equals(name, StringComparison.OrdinalIgnoreCase))
                 ;
         }
-        
+
+        private void Log(string message)
+        {
+            _logger.LogInformation(message);
+        }
+
         private class TempFolder : IDisposable
         {
             private readonly string _folder;
